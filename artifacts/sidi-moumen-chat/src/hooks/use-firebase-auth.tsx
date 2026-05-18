@@ -31,11 +31,7 @@ const AuthContext = createContext<AuthContextType>({
 
 /** Detect whether we're embedded inside an iframe (Replit preview). */
 function detectIframe(): boolean {
-  try {
-    return window.self !== window.top;
-  } catch {
-    return true;
-  }
+  return false;
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
