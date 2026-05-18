@@ -3,11 +3,11 @@ import { useChatStats } from "@/hooks/use-firestore-chat";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Users, MessageSquare, Clock, AlertCircle, ExternalLink } from "lucide-react";
+import { Users, MessageSquare, Clock, AlertCircle } from "lucide-react";
 import { Redirect } from "wouter";
 
 export default function Home() {
-  const { isAuthenticated, isLoading: authLoading, login, loginError, isInIframe } = useFirebaseAuth();
+  const { isAuthenticated, isLoading: authLoading, login, loginError } = useFirebaseAuth();
   const stats = useChatStats();
 
   if (authLoading) {
@@ -21,10 +21,6 @@ export default function Home() {
   if (isAuthenticated) {
     return <Redirect to="/chat" />;
   }
-
-  const openInNewTab = () => {
-    window.open(window.location.href, "_blank", "noopener,noreferrer");
-  };
 
   return (
     <div className="min-h-[100dvh] flex flex-col bg-background overflow-hidden relative">
@@ -78,28 +74,6 @@ export default function Home() {
               </CardHeader>
             </Card>
           </div>
-
-          {/* Iframe warning — show when running inside Replit preview */}
-          {isInIframe && (
-            <div className="flex items-start gap-3 bg-amber-500/10 border border-amber-500/30 text-amber-400 rounded-xl p-4 text-sm text-left">
-              <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
-              <div className="space-y-2">
-                <p className="font-medium">للتسجيل يجب فتح الموقع في نافذة مستقلة</p>
-                <p className="text-amber-400/70 text-xs">
-                  تسجيل الدخول لا يعمل داخل نافذة المعاينة. اضغط الزر أدناه لفتح الموقع في تبويب جديد.
-                </p>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="border-amber-500/40 text-amber-400 hover:bg-amber-500/10 mt-1"
-                  onClick={openInNewTab}
-                >
-                  <ExternalLink className="w-3.5 h-3.5 mr-2" />
-                  فتح في تبويب جديد
-                </Button>
-              </div>
-            </div>
-          )}
 
           {/* Login error */}
           {loginError && (
