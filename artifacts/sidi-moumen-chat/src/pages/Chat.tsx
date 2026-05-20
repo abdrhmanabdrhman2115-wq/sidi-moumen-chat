@@ -11,12 +11,18 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Drawer, DrawerContent, DrawerTrigger } from "@/components/ui/drawer";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatDistanceToNow, format } from "date-fns";
-import { Send, Trash2, Users, MessageSquare, Wifi } from "lucide-react";
+import { Send, Trash2, Users, MessageSquare, Wifi, Mic, StopCircle, Image as ImageIcon } from "lucide-react";
 
 export default function Chat() {
   const { user, isAuthenticated, isLoading: authLoading } = useFirebaseAuth();
   const [content, setContent] = useState("");
   const [sending, setSending] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordedAudio, setRecordedAudio] = useState<Blob | null>(null);
+  const [selectedImage, setSelectedImage] = useState<File | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const { messages, isLoading: messagesLoading } = useMessages();
@@ -28,29 +34,47 @@ export default function Chat() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  if (authLoading) {
-    return (
-      <div className="min-h-[100dvh] flex flex-col bg-background">
-        <header className="h-16 border-b bg-card" />
-        <div className="flex-1 flex">
-          <div className="flex-1 p-4"><Skeleton className="h-full w-full" /></div>
-          <div className="w-64 border-l p-4 hidden md:block"><Skeleton className="h-full w-full" /></div>
-        </div>
-      </div>
-    );
-  }
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
 
-  if (!isAuthenticated) {
-    return <Redirect to="/" />;
-  }
+      mediaRecorder.ondataavailable = (event) => {
+        audioChunksRef.current.push(event.data);
+      };
+
+      mediaRecorder.onstop = () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+        setRecordedAudio(audioBlob);
+        stream.getTracks().forEach((track) => track.stop());
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+    } catch (err) {
+      console.error("Microphone access denied", err);
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+    }
+  };
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!content.trim() || !user || sending) return;
+    if ((!content.trim() && !recordedAudio && !selectedImage) || !user || sending) return;
     setSending(true);
     try {
-      await sendMessage(user, content.trim());
+      const audioFile = recordedAudio ? new File([recordedAudio], "audio.webm", { type: "audio/webm" }) : undefined;
+      await sendMessage(user, content.trim(), selectedImage || undefined, audioFile);
       setContent("");
+      setRecordedAudio(null);
+      setSelectedImage(null);
     } finally {
       setSending(false);
     }
@@ -99,6 +123,22 @@ export default function Chat() {
       </ScrollArea>
     </div>
   );
+
+  if (authLoading) {
+    return (
+      <div className="min-h-[100dvh] flex flex-col bg-background">
+        <header className="h-16 border-b bg-card" />
+        <div className="flex-1 flex">
+          <div className="flex-1 p-4"><Skeleton className="h-full w-full" /></div>
+          <div className="w-64 border-l p-4 hidden md:block"><Skeleton className="h-full w-full" /></div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <Redirect to="/" />;
+  }
 
   return (
     <Layout>
@@ -188,12 +228,20 @@ export default function Chat() {
                             </Button>
                           )}
 
-                          <div className={`px-4 py-2 rounded-2xl text-[15px] leading-relaxed break-words ${
+                          <div className={`flex flex-col gap-2 px-4 py-2 rounded-2xl text-[15px] leading-relaxed break-words ${
                             isOwnMessage
                               ? "bg-primary text-primary-foreground rounded-br-sm shadow-sm"
                               : "bg-card border border-border/50 text-card-foreground rounded-bl-sm shadow-sm"
                           }`}>
-                            {msg.content}
+                            {msg.imageURL && (
+                              <img src={msg.imageURL} alt="Message" className="max-w-full max-h-64 rounded-lg" />
+                            )}
+                            {msg.audioURL && (
+                              <audio controls className="max-w-full">
+                                <source src={msg.audioURL} type="audio/webm" />
+                              </audio>
+                            )}
+                            {msg.content && <p>{msg.content}</p>}
                           </div>
 
                           {!showHeader && (
@@ -213,46 +261,109 @@ export default function Chat() {
 
           {/* Input */}
           <div className="p-3 bg-background border-t">
-            <div className="flex items-center gap-2 max-w-4xl mx-auto">
-              <div className="md:hidden">
-                <Drawer>
-                  <DrawerTrigger asChild>
-                    <Button variant="outline" size="icon" className="shrink-0 text-muted-foreground relative" data-testid="button-online-users">
-                      <Users className="h-5 w-5" />
-                      <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-primary text-primary-foreground text-[10px] flex items-center justify-center font-bold">
-                        {onlineUsers.length}
-                      </span>
-                    </Button>
-                  </DrawerTrigger>
-                  <DrawerContent>
-                    <div className="p-4 pb-8 max-h-[80vh]">
-                      <UsersList />
+            <div className="flex items-center gap-2 max-w-4xl mx-auto flex-col">
+              {/* Preview Section */}
+              {(recordedAudio || selectedImage) && (
+                <div className="w-full flex gap-2 items-center bg-muted/50 p-2 rounded-lg">
+                  {selectedImage && (
+                    <div className="relative">
+                      <img
+                        src={URL.createObjectURL(selectedImage)}
+                        alt="Selected"
+                        className="h-16 w-16 object-cover rounded"
+                      />
+                      <button
+                        onClick={() => setSelectedImage(null)}
+                        className="absolute -top-2 -right-2 bg-destructive text-white rounded-full w-5 h-5 flex items-center justify-center text-xs"
+                      >
+                        ✕
+                      </button>
                     </div>
-                  </DrawerContent>
-                </Drawer>
-              </div>
+                  )}
+                  {recordedAudio && (
+                    <div className="flex-1 flex items-center gap-2">
+                      <audio src={URL.createObjectURL(recordedAudio)} controls className="h-8 flex-1" />
+                      <button
+                        onClick={() => setRecordedAudio(null)}
+                        className="bg-destructive text-white px-2 py-1 rounded text-xs"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
 
-              <form onSubmit={handleSend} className="flex-1 flex gap-2 relative">
-                <Input
-                  data-testid="input-message"
-                  value={content}
-                  onChange={(e) => setContent(e.target.value)}
-                  placeholder="Type a message..."
-                  className="flex-1 bg-card border-border/50 rounded-full pl-5 pr-14 h-12 text-[15px] shadow-sm focus-visible:ring-1 focus-visible:ring-primary/50"
-                  disabled={sending}
-                  autoComplete="off"
-                />
-                <Button
-                  type="submit"
-                  size="icon"
-                  data-testid="button-send"
-                  className="absolute right-1.5 top-1 h-10 w-10 rounded-full shadow-sm"
-                  disabled={!content.trim() || sending}
-                >
-                  <Send className="h-4 w-4" />
-                  <span className="sr-only">Send</span>
-                </Button>
-              </form>
+              <div className="flex items-center gap-2 w-full">
+                <div className="md:hidden">
+                  <Drawer>
+                    <DrawerTrigger asChild>
+                      <Button variant="outline" size="icon" className="shrink-0 text-muted-foreground relative" data-testid="button-online-users">
+                        <Users className="h-5 w-5" />
+                        <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-primary text-primary-foreground text-[10px] flex items-center justify-center font-bold">
+                          {onlineUsers.length}
+                        </span>
+                      </Button>
+                    </DrawerTrigger>
+                    <DrawerContent>
+                      <div className="p-4 pb-8 max-h-[80vh]">
+                        <UsersList />
+                      </div>
+                    </DrawerContent>
+                  </Drawer>
+                </div>
+
+                <form onSubmit={handleSend} className="flex-1 flex gap-2 relative">
+                  <Input
+                    data-testid="input-message"
+                    value={content}
+                    onChange={(e) => setContent(e.target.value)}
+                    placeholder="Type a message..."
+                    className="flex-1 bg-card border-border/50 rounded-full pl-5 pr-14 h-12 text-[15px] shadow-sm focus-visible:ring-1 focus-visible:ring-primary/50"
+                    disabled={sending}
+                    autoComplete="off"
+                  />
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => setSelectedImage(e.target.files?.[0] || null)}
+                    className="hidden"
+                  />
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="text-muted-foreground hover:text-foreground"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <ImageIcon className="h-5 w-5" />
+                  </Button>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className={isRecording ? "text-red-500" : "text-muted-foreground hover:text-foreground"}
+                    onClick={isRecording ? stopRecording : startRecording}
+                  >
+                    {isRecording ? (
+                      <StopCircle className="h-5 w-5" />
+                    ) : (
+                      <Mic className="h-5 w-5" />
+                    )}
+                  </Button>
+                  <Button
+                    type="submit"
+                    size="icon"
+                    data-testid="button-send"
+                    className="absolute right-1.5 top-1 h-10 w-10 rounded-full shadow-sm"
+                    disabled={(!content.trim() && !recordedAudio && !selectedImage) || sending}
+                  >
+                    <Send className="h-4 w-4" />
+                    <span className="sr-only">Send</span>
+                  </Button>
+                </form>
+              </div>
             </div>
           </div>
         </div>
