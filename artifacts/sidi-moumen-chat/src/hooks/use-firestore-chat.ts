@@ -13,7 +13,8 @@ import {
   where,
   Timestamp,
 } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { db, storage } from "@/lib/firebase";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import type { User } from "firebase/auth";
 
 export type ChatMessage = {
@@ -23,6 +24,8 @@ export type ChatMessage = {
   userDisplayName: string;
   userPhotoURL: string | null;
   createdAt: Date;
+  imageURL?: string;
+  audioURL?: string;
 };
 
 export function useMessages() {
@@ -46,6 +49,8 @@ export function useMessages() {
             userId: data.userId as string,
             userDisplayName: data.userDisplayName as string,
             userPhotoURL: (data.userPhotoURL as string | null) ?? null,
+            imageURL: (data.imageURL as string | undefined) ?? undefined,
+            audioURL: (data.audioURL as string | undefined) ?? undefined,
             createdAt:
               data.createdAt instanceof Timestamp
                 ? data.createdAt.toDate()
@@ -62,14 +67,30 @@ export function useMessages() {
   return { messages, isLoading };
 }
 
-export async function sendMessage(user: User, content: string) {
-  await addDoc(collection(db, "messages"), {
+export async function sendMessage(user: User, content: string, imageFile?: File, audioFile?: File) {
+  const messageData: any = {
     content,
     userId: user.uid,
     userDisplayName: user.displayName ?? "Anonymous",
     userPhotoURL: user.photoURL ?? null,
     createdAt: serverTimestamp(),
-  });
+  };
+
+  // Upload image if provided
+  if (imageFile) {
+    const imageRef = ref(storage, `images/${user.uid}/${Date.now()}_${imageFile.name}`);
+    await uploadBytes(imageRef, imageFile);
+    messageData.imageURL = await getDownloadURL(imageRef);
+  }
+
+  // Upload audio if provided
+  if (audioFile) {
+    const audioRef = ref(storage, `audio/${user.uid}/${Date.now()}_${audioFile.name}`);
+    await uploadBytes(audioRef, audioFile);
+    messageData.audioURL = await getDownloadURL(audioRef);
+  }
+
+  await addDoc(collection(db, "messages"), messageData);
 }
 
 export async function deleteMessage(id: string) {
